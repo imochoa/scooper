@@ -1,0 +1,44 @@
+# vim:set ft=dockerfile:
+FROM ubuntu:20.04
+
+ARG CYAN='\033[0;36m'
+ARG NO_COLOR='\033[0m'
+
+# TODO TRY "--no-install-recommends" (e.g RUN apt-get update && apt-get install --no-install-recommends --yes python3)
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Add Tini
+ARG TINI_VERSION='v0.19.0'
+ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
+RUN chmod +x /tini
+
+RUN apt-get update \
+    && apt-get install -y texlive
+
+# no install recommnds
+RUN apt-get install -y texlive-latex-base texlive-fonts-recommended texlive-fonts-extra texlive-latex-extra
+
+# For compressing
+RUN apt-get install -y ghostscript
+
+# DIRECTORY
+ADD pyscooper /opt/pyscooper
+
+
+RUN mkdir /inputs
+RUN mkdir /outputs
+VOLUME ["/inputs", "/outputs"]
+WORKDIR "/inputs"
+
+# USER
+#     && addgroup -g 1000 -S username \
+  #    && adduser -u 1000 -S username -G username
+
+ENTRYPOINT ["/tini", "--"]
+## Run your program under Tini
+#CMD ["/your/program", "-and", "-its", "arguments"]
+## or docker run your-image /your/program ...
+
+
+#CMD ["pdflatex", "-output-directory=/outputs", "/opt/pyscooper/template.tex" ]
+CMD ["/opt/pyscooper/scooper.py"]

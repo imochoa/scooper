@@ -15,6 +15,7 @@ LATEX_PREFIX = r"""
 \usepackage{lastpage} % reference last page
 
 % Nicer Font
+\usepackage[utf8]{inputenc}
 \usepackage[scaled]{helvet}
 \usepackage[T1]{fontenc}
 \renewcommand\familydefault{\sfdefault}

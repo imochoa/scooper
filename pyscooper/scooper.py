@@ -1,10 +1,11 @@
 #! /usr/bin/env python3
-import ipdb
 
 # std imports
 import typing as T
+import tempfile
 import pprint
 import os
+import sys
 import pathlib
 import glob
 import shutil
@@ -123,6 +124,12 @@ if __name__ == "__main__":
         "-r", "--recursive", action="store_true", help="Go down into each directory"
     )
 
+    # TODO max depth
+
+    parser.add_argument(
+        "-d", "--debug", action="store_true", help="Leaves the LaTeX source directory after finishing"
+    )
+
     parser.add_argument(
         "-o", "--output", type=pathlib.Path, help="Where to save the output PDF", default=DFEAULT_OUTPDF,
     )
@@ -220,6 +227,7 @@ if __name__ == "__main__":
 
             for idx in sorted(update_map):
                 tex_body += TOC_HEADING_FCN_MAP[idx](update_map[idx])
+                tex_body += '\n'
 
             # Include a LINK to the file -> avoids filename issues (like with spaces)
             link = link_dir / f"{uuid.uuid4()}{entry.filepath.suffix.lower()}"
@@ -240,3 +248,15 @@ if __name__ == "__main__":
         # compress?
         # if pdf_path:
         #     compress_doc()
+
+        if args.debug:
+            aux_debug_dir = pathlib.Path(tempfile.gettempdir()) / str(uuid.uuid4())
+            # shutil.rmtree(aux_debug_dir, ignore_errors=True)
+            shutil.copytree(tmp_dir, aux_debug_dir, symlinks=True)
+        else:
+            aux_debug_dir = None
+    if aux_debug_dir:
+        info(f"Recovering the LaTeX debug dir {src_tex.absolute()}")
+        warning("It will NOT be cleaned up automatically!")
+        shutil.copytree(aux_debug_dir, tmp_dir, symlinks=True)
+        shutil.rmtree(aux_debug_dir, ignore_errors=True)

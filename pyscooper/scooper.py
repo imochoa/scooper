@@ -1,7 +1,9 @@
 #! /usr/bin/env python3
+import ipdb
 
 # std imports
-from typing import Union, List, Optional, Dict, Set, Tuple, Sequence
+import typing as T
+import pprint
 import os
 import pathlib
 import glob
@@ -10,236 +12,100 @@ import argparse
 import itertools
 import subprocess
 import tempfile
-from collections import namedtuple
+import uuid
 
-# pip imports
+from pyscooper.attachments import scoop, VALID_EXTS
+from pyscooper.cli_utils import debug, info, warning, error
+# from pyscooper.tableofcontents import build_toc_tree, build_filetree, sort_toc_maps, filemap2tocmap
+from pyscooper.tex_utils import (sanitize_tex, export_tex_doc, compile_doc, compress_doc,
+                                 tex_section, tex_subsection, tex_subsubsection,
+                                 TOC_HEADING_FCN_MAP)
+# from pyscooper.tex_template import tex_section, tex_subsection, tex_subsubsection, LATEX_PREFIX, LATEX_SUFFIX
+# from pyscooper import VALID_EXTS, Resource, TEX_TEMPLATE, SPLIT_TEXT
 
-# Image compression?
-#  >>> from PIL import Image
-#  # My image is a 200x374 jpeg that is 102kb large
-#  >>> foo = Image.open("path\\to\\image.jpg")
-#  >>> foo.size
-#   (200,374)
-#  # I downsize the image with an ANTIALIAS filter (gives the highest quality)
-#  >>> foo = foo.resize((160,300),Image.ANTIALIAS)
-#  >>> foo.save("path\\to\\save\\image_scaled.jpg",quality=95)
-#  # The saved downsized image size is 24.8kb
-#  >>> foo.save("path\\to\\save\\image_scaled_opt.jpg",optimize=True,quality=95)
-#  # The saved downsized image size is 22.9kb
+from typing import NamedTuple, Any
 
 
-Resource = namedtuple('Resource', ['path', 'name'])
+# class TOCFile(NamedTuple):
+#     filepath: pathlib.Path
+#     # To the PARENT dir!
+#     keypath: T.Tuple[str]
 
-TEX_TEMPLATE = pathlib.Path(__file__).parent / 'template.tex'
-SPLIT_TEXT = '% ---- PYTHON AUTO-SPLIT ----'
+# TODO add joining fcn instead of f"{}/{}"
 
-VALID_EXTS = {'.jpeg', '.jpg', '.png', '.pdf', }
+class TOCFile:
 
+    def __init__(self, filepath: pathlib.Path, keypath: T.Tuple[str], ):
+        # To the PARENT dir!
+        self.filepath = filepath
+        self.keypath = keypath
 
-def sanitize_tex(in_str: object) -> str:
-    return (str(in_str)
-            .replace('$', '')
-            .replace('%', '')
-            .replace('_', ' '))
-
-
-def tree(path: pathlib.Path, max_depth: int = 0, _depth: int = 0) -> Dict[str, pathlib.Path]:
-    if path.is_file():
-        return path
-    elif path.is_dir() and (max_depth <= 0 or _depth < max_depth):
-        k_and_v = ((str(f.relative_to(path)), tree(f, max_depth=max_depth, _depth=_depth + 1))
-                   for f in path.iterdir())
-        return {k: v for k, v in k_and_v if v}
+    def __repr__(self):
+        return f"<{self.__class__} filepath={self.filepath}, keypath={self.keypath}>"
 
 
-# def toc_tree(filemap: Union[Dict[str, pathlib.Path], pathlib.Path], _prefix=None) -> Dict[str, str]:
-#     if _prefix is None:
-#         _prefix = tuple()
-#
-#     if isinstance(filemap, dict):
-#         return_d = dict()
-#         for k, v in filemap.items():
-#             if not isinstance(v, dict):
-#                 return_d[_prefix + (k,)] = toc_tree(v, _prefix=_prefix + (k,))
-#             else:
-#                 return_d.update(toc_tree(v, _prefix=_prefix + (k,)))
-#
-#         return return_d
-#
-#     return filemap
+def fold_empty_nodes(recd: dict,
+                     ) -> T.Tuple[T.Dict, bool]:
+    """
+    RECURSIVE!
+
+    :param recd:
+    :return: updated recd, helper bool)
+    """
+    # preparation
+    dks = [k for k, v in recd.items() if isinstance(v, dict)]
+    foldable = len(recd) == 1 and len(dks) == 1
+
+    for k in dks:
+        ld, lf = fold_empty_nodes(recd[k])
+
+        if lf:
+            [lk] = ld.keys()
+            recd[f"{k}/{lk}"] = recd.pop(k).pop(lk)
+
+    return recd, foldable
 
 
-def build_toc_tree(path: pathlib.Path,
-                   max_depth: int = 0,
-                   valid_exts: Set[str] = VALID_EXTS,
-                   _prefix: Optional[Tuple[str]] = tuple(),
-                   ) -> Dict[pathlib.Path, Tuple[str]]:
-    if path.is_file() and path.suffix.lower() in valid_exts:
-        return {path: _prefix + (path.name,)}
-    elif path.is_dir() and (max_depth <= 0 or len(_prefix) < max_depth):
-        f_trees = (build_toc_tree(f,
-                                  max_depth=max_depth,
-                                  valid_exts=valid_exts,
-                                  _prefix=_prefix + (path.name,),
-                                  ) for f in path.iterdir()
-                   )
-        f_trees = (ft for ft in f_trees if ft)
-        out_d = dict()
-        for ft in f_trees:
-            out_d.update(ft)
-        return out_d
+def extract_entries(recd,
+                    keypath=None,
+                    ) -> T.List[TOCFile]:
+    # preparation
+    keypath = keypath or []
+    vs = list(recd.values())
+
+    # Exit condition
+    if len(vs) == 1 and isinstance(vs[0], pathlib.Path):
+        return [TOCFile(filepath=vs[0], keypath=keypath, )]
+
+    res = []
+    for k, v in recd.items():
+        if isinstance(v, pathlib.Path):
+            res.append(TOCFile(filepath=v, keypath=keypath, ))
+        else:
+            res.extend(extract_entries(v, keypath=keypath + [k]))
+
+    return res
 
 
-def sort_toc_maps(*args: Sequence[Dict[pathlib.Path, Tuple[str]]]):
-    global_toc_tree = dict()
-    for toc_tree in args:
-        global_toc_tree.update(toc_tree)
+DFEAULT_OUTPDF = pathlib.Path().cwd() / 'out.pdf'
 
-    return [(k, global_toc_tree[k])
-            for k in
-            sorted(global_toc_tree, key=lambda k: (len(global_toc_tree[k]), ' '.join(global_toc_tree[k])))]
-
-
-# ans_d = build_toc_tree(pathlib.Path('/home/ignacio/PycharmProjects/scooper'))
-#
-# sort_toc_maps(ans_d)
-
-
-# ans_d = tree(pathlib.Path('/home/ignacio/PycharmProjects/scooper'))
-# ans_l = toc_tree(ans_d)
-# print('\n'.join([str(k) for k in sorted(ans_l, key=lambda k: ''.join(k))]))
-
-
-def export_tex_doc(tex_body: str, out_path: Union[str, pathlib.Path]) -> None:
-    tex_splits = ['']
-    with open(TEX_TEMPLATE, 'r') as fp:
-        for line in fp:
-            if line.strip() != SPLIT_TEXT:
-                tex_splits[-1] += line
-            else:
-                tex_splits.append('')
-
-    prefix = tex_splits[0:1]
-    suffix = tex_splits[2:3]
-
-    with open(out_path, 'w') as fp:
-        fp.write('\n'.join(itertools.chain(prefix, [tex_body], suffix)))
-
-
-def scoop_img(file: pathlib.Path) -> str:
-    return '\n'.join(
-        [r'\begin{centering}',
-         r'\vspace*{\fill}',
-         r'\includegraphics[width=\linewidth]{' + str(file.absolute()) + r'}',
-         r'\vspace*{\fill}',
-         r'\end{centering}',
-         r'\pagebreak',
-         r'',
-         ])
-
-
-def scoop_text(file: pathlib.Path) -> str:
-    with open(file, 'r') as fp:
-        contents = '\n'.join(fp.readlines())
-
-    return '\n'.join(
-        [r'\begin{centering}',
-         r'\vspace*{\fill}',
-         f"\n\n{contents}\n\n",
-         r'\vspace*{\fill}',
-         r'\end{centering}',
-         r'\pagebreak',
-         r'',
-         ])
-
-
-def scoop_pdf(file: pathlib.Path) -> str:
-    return '\n'.join(
-        [r'\begin{centering}',
-         r'\vspace*{\fill}',
-         r'\includepdf[pages=-,pagecommand={},width=\linewidth]{' + str(file.absolute()) + r'}',
-         r'\vspace*{\fill}',
-         r'\end{centering}',
-         r'',
-         ])
-
-
-def scoop_vid(file: pathlib.Path) -> str:
-    # TODO
-
-    return '\n'.join(
-        [r'\begin{centering}',
-         r'\vspace*{\fill}',
-         r'TODO',
-         r'\vspace*{\fill}',
-         r'\end{centering}',
-         r'',
-         ])
-
-
-def scoop_3d(file: pathlib.Path) -> str:
-    # TODO
-    return '\n'.join(
-        [r'\begin{centering}',
-         r'\vspace*{\fill}',
-         r'TODO',
-         r'\vspace*{\fill}',
-         r'\end{centering}',
-         r'',
-         ])
-
-
-EXT_MAP = {
-    '.jpg':  scoop_img,
-    '.jpeg': scoop_img,
-    '.png':  scoop_img,
-    '.tex':  scoop_text,
-    '.txt':  scoop_text,
-    '.log':  scoop_text,
-    '.pdf':  scoop_pdf,
-    '.mp4':  scoop_vid,
-}
-
-
-def scoop(file: pathlib.Path) -> str:
-    # TODO BUILD TOD ENTRY HERE!
-
-    # def generate_toc_component(file: pathlib.Path, relative_to: Optional[pathlib.Path] = None):
-    #     if relative_to:
-    #         section_name = file.relative_to(relative_to)
-    #     # TODO
-    #     print("WTF")
-    #     return '\n'.join([r'\phantomsection',
-    #                       r'\addcontentsline{toc}{section}{\protect{' + str(file.stem) + r'}}',
-    #                       r'',
-    #                       ])
-
-    #
-    #
-    # toc_component = '\n'.join(
-    #     [r'\phantomsection',
-    #      r'\addcontentsline{toc}{section}{\protect{' + str(file.stem).replace('$', '').replace('%', '').replace('_',
-    #                                                                                                             ' ')
-    #      + r'}}',
-    #
-    #      r'',
-    #      ])
-
-    return EXT_MAP[file.suffix.lower()](file)
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("sources",
-                        nargs='*',
-                        type=str,
-                        default=pathlib.Path.cwd(),
-                        help="What to include in the scoop: (files [JPG,PNG,PDF,MP3,MP4], directories, globs [*.jpg])",
-                        )
+    parser.add_argument(
+        "sources",
+        nargs="*",
+        type=str,
+        default=pathlib.Path.cwd(),
+        help="What to include in the scoop: (files [JPG,PNG,PDF,MP3,MP4], directories, globs [*.jpg])",
+    )
 
-    parser.add_argument('-r', '--recursive',
-                        action='store_true',
-                        help="Go down into each directory")
+    parser.add_argument(
+        "-r", "--recursive", action="store_true", help="Go down into each directory"
+    )
+
+    parser.add_argument(
+        "-o", "--output", type=pathlib.Path, help="Where to save the output PDF", default=DFEAULT_OUTPDF,
+    )
 
     args = parser.parse_args()
 
@@ -249,114 +115,121 @@ if __name__ == '__main__':
     # Top-level files (can be overwritten by the glob matches)
     top_files = {f for f in sources if f.is_file() and f.suffix.lower() in VALID_EXTS}
     top_dirs = {d for d in sources if d.is_dir()}
-    other_strings = sorted(map(str, set(sources).difference(top_files).difference(top_dirs)))
-    glob_strings = [s for s in other_strings if '*' in s]
-    other_strings = [s for s in other_strings if s not in glob_strings]
-    if other_strings:
-        print('\n\t>'.join([f"Did not know how to handle {len(other_strings)} inputs:"] + other_strings))
+    other_strings = sorted(
+        map(str, set(sources).difference(top_files).difference(top_dirs))
+    )
+    # glob_strings = [s for s in other_strings if "*" in s]
+    # other_strings = [s for s in other_strings if s not in glob_strings]
+    if top_files:
+        info(
+            "\n\t> ".join(
+                [f"Found [{len(top_files)}] files:"] + [str(d) for d in top_files]
+            )
+        )
+    if top_dirs:
+        info(
+            "\n\t> ".join(
+                [f"Found [{len(top_dirs)}] directories:"] + [str(d) for d in top_dirs]
+            )
+        )
+    # if glob_strings:
+    #     warning(
+    #         "\n\t> ".join(
+    #             [f"Expanding {len(glob_strings)} possible globs:"] + glob_strings
+    #         )
+    #     )
+    # if other_strings:
+    #     warning(
+    #         "\n\t> ".join(
+    #             [f"Did not know how to handle {len(other_strings)} inputs:"]
+    #             + other_strings
+    #         )
+    #     )
 
-    toc_map = {f: (f.name,) for f in top_files}  # Direct files have the least priority
+    # BUILD FILE DICT
 
-    for d in top_dirs:
-        toc_map.update(build_toc_tree(d))
+    # Top files -> Top level
+    filemap = {f.name: f for f in top_files}
 
-    for glob_str in glob_strings:
-        glob_root = pathlib.Path(glob_str)
-        glob_root_idx = next((idx for idx, s in enumerate(glob_root.parts[::-1]) if '*' not in s))
-        glob_root = pathlib.Path(*glob_root.parts[:-glob_root_idx - 1])
+    # Dirs and globs -> search!
+    for top_dir in top_dirs:
+        fs = (f for f in top_dir.rglob('*') if f.is_file())
+        fs = (f for f in fs if f.suffix.lower() in VALID_EXTS)
+        for f in fs:
+            relpath = f.relative_to(top_dir)
+            *ancestors, filename = relpath.parts
+            aux_dict = filemap
+            for ancestor in ancestors:
+                aux_dict = aux_dict.setdefault(ancestor, dict())
+            aux_dict[filename] = f
+    # Collapse first!
 
-        glob_res = glob.glob(str(glob_str), recursive=args.recursive)
-        glob_res = (pathlib.Path(f) for f in glob_res)
-        glob_res = (f for f in glob_res if f.is_file())
+    filemap, _ = fold_empty_nodes(filemap)
+    entries = extract_entries(filemap)
 
-        toc_map.update({glob_f: glob_f.relative_to(glob_root).parts for glob_f in glob_res})
-
-    tex_body = ''
-
-    current_toc_position = [None, None, None]
-
-    for f, toc_entry in sort_toc_maps(toc_map):
-        toc_entry = list(toc_entry)
-
-        # New subsubsection?
-        s = slice(2, 3)
-        # not_s = slice(0, 2)
-        if toc_entry[s] and current_toc_position[s] != toc_entry[s]:
-            current_toc_position[s] = toc_entry[s]
-            title = sanitize_tex('/'.join(toc_entry[2:]))
-            tex_body += r'\newsubsubsection{' + title + r'}'
-
-        # New subsection
-        s = slice(1, 2)
-        if toc_entry[s] and current_toc_position[s] != toc_entry[s]:
-            current_toc_position[s] = toc_entry[s]
-            current_toc_position[2:] = [None]
-            title = sanitize_tex(toc_entry[s][0])
-            tex_body += r'\newsubsection{' + title + r'}'
-
-        # New section
-        s = slice(0, 1)
-        if toc_entry[s] and current_toc_position[s] != toc_entry[s]:
-            current_toc_position[s] = toc_entry[s]
-            current_toc_position[1:] = [None, None]
-            title = sanitize_tex(toc_entry[s][0])
-            tex_body += r'\newsection{' + title + r'}'
-
-        tex_body += scoop(f)
-
+    # Write LaTeX document
     with tempfile.TemporaryDirectory() as tmp:
-
         tmp_dir = pathlib.Path(tmp)
-        src_tex = tmp_dir / 'src.tex'
+        link_dir = tmp_dir / 'links'
+        link_dir.mkdir()
 
-        export_tex_doc(tex_body=tex_body, out_path=src_tex, )
+        # Build LaTeX source
 
-        cmd = ['pdflatex',
-               '-output-directory',
-               str(tmp_dir),
-               str(src_tex),
-               ]
-        p1 = subprocess.run(cmd)
-        p2 = subprocess.run(cmd)
+        tex_body = ""
+        toc_lvl = 0
 
-        if p1.returncode == 0 and p2.returncode == 0:
-            pdf_path = next(tmp_dir.glob('*.pdf'))
-            dst_path = pathlib.Path().cwd() / pdf_path.name
+        for entry in entries:
+            last_toc_level = toc_lvl
+            toc_lvl = {0: 0,
+                       1: 1,
+                       }.get(len(entry.keypath), 2)
 
-            # TODO Skip if ghostscript is missing...
+            toc_entry_fcn = TOC_HEADING_FCN_MAP[toc_lvl]
 
-            # # MOVE
-            # if dst_path.is_file():
-            #     os.remove(dst_path)
-            # shutil.move(src=str(pdf_path), dst=str(dst_path))
+            # TOC Nesting
+            toc_delta = toc_lvl - last_toc_level
+            if toc_lvl > last_toc_level:
+                try:
+                    parts = list(entry.filepath.parts[:-1])
+                    folded_dirs = [(p1, p2) for p1, p2 in zip(parts[:-1], parts[1:]) if f"{p1}/{p2}" in entry.keypath]
+                    for p1, p2 in folded_dirs[::-1]:
+                        p1_idx = parts.index(p1)
+                        parts[p1_idx] = f"{p1}/{parts.pop(p1_idx + 1)}"
+                    top_lvl = parts[parts.index(entry.keypath[0]) - 1]
+                except ValueError as e:
+                    debug(f"Failed to find parent of {entry.filepath}")
+                    top_lvl = '/'
+                deepest_lvl = max(TOC_HEADING_FCN_MAP.keys())
+                entries_beyond_depth = ' / '.join(entry.keypath[deepest_lvl:])
+                entries_beyond_depth = [' / '.join(entries_beyond_depth)] if entries_beyond_depth else []
+                path2entry = entry.keypath[:deepest_lvl] + entries_beyond_depth
+                path2entry = [top_lvl] if not path2entry else path2entry
+                nested_tocs = dict()
+                for idx in range(last_toc_level, toc_lvl):
+                    tex_body += TOC_HEADING_FCN_MAP[idx](path2entry[idx])
 
-            # COMPRESS
-            # https://github.com/pts/pdfsizeopt
-            print("Trying to compress the pdf...")
+                # for idx, p in enumerate(path2entry):
+                #     tex_body += TOC_HEADING_FCN_MAP[idx](p)
 
-            prev_size = pdf_path.stat().st_size / 1e6  # [Mb]
-            compress_cmd = ['gs',
-                            '-sDEVICE=pdfwrite',
-                            '-dCompatibilityLevel=1.5',
-                            '-dNOPAUSE',
-                            '-dQUIET',
-                            '-dBATCH',
-                            '-dPrinted=false',
-                            f'-sOutputFile="{dst_path}"',
-                            f'"{pdf_path}"',
-                            ]
-            post_size = dst_path.stat().st_size / 1e6  # [Mb]
+            # TOC entry (real file name)
+            tex_body += toc_entry_fcn(entry.filepath.name)
 
-            p3 = subprocess.run(compress_cmd)
-            # gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.5 -dNOPAUSE -dQUIET -dBATCH -dPrinted=false -sOutputFile=foo-compressed.pdf foo.pdf
-            if p3.returncode == 0:
-                print(f"Compression reduced the output PDF size from "
-                      f"{prev_size:.2f}[Mb] to {post_size:.2f}[Mb] ({(post_size - prev_size) / prev_size:+.1%})")
-                print(f"Wrote {dst_path}!")
-                print(f"Wrote {dst_path}!")
-                print(f"Wrote {dst_path}!")
-            else:
-                print("OOPS")
+            # Include a LINK to the file -> avoids filename issues (like with spaces)
+            link = link_dir / f"{uuid.uuid4()}{entry.filepath.suffix.lower()}"
+            link.symlink_to(entry.filepath)
+            tex_body += scoop(link)
 
-        else:
-            print("meow")
+        src_tex = tmp_dir / "src.tex"
+        export_tex_doc(
+            tex_body=tex_body,
+            out_path=src_tex,
+        )
+
+        pdf_path = compile_doc(src_tex, tmp_dir)
+
+        shutil.copy(pdf_path, args.output)
+        info(f"Wrote {args.output} ({args.output.stat().st_size / 1e6:.2g} [Mb])")
+
+        # compress?
+        # if pdf_path:
+        #     compress_doc()

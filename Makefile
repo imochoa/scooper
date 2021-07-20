@@ -18,18 +18,18 @@ help:
 
 .PHONY: build-ubuntu
 build-ubuntu:
-	docker build \
+	docker build                     \
 		-f provision/Dockerfile-ubuntu \
-		-t ${IMG_UBUNTU} \
+		-t ${IMG_UBUNTU}               \
 		.
 
 .PHONY: run-ubuntu
 run-ubuntu:
-	docker run \
-		--rm \
-		-it \
-		--user username:${GID} \
-		-v `pwd`:/inputs/ \
+	docker run                                                 \
+		--rm                                                     \
+		-it                                                      \
+		--user username:${GID}                                   \
+		-v `pwd`:/inputs/                                        \
 		--mount type=bind,source=`pwd`,target=/outputs/,readonly \
 		${IMG_UBUNTU}
 

@@ -4,6 +4,7 @@
 import logging
 import typing as T
 import pathlib
+import functools
 
 
 def sanitize_path(in_str: T.Union[pathlib.Path, str], ) -> str:
@@ -45,11 +46,22 @@ def tex_centering(fcn, add_pagebreak: bool = False):
     return wrapper
 
 
+def blank_pad(fcn):
+    @functools.wraps(fcn)
+    def wrapper(*args, **kwargs):
+        pad = '\n' * 2
+        return f"{pad}{fcn(*args, **kwargs)}{pad}"
+
+    return wrapper
+
+
+@blank_pad
 @tex_centering(add_pagebreak=True)
 def scoop_img(file: pathlib.Path, width: None = None, ) -> str:
     return r'\includegraphics[width=\linewidth]{' + sanitize_path(file.absolute()) + r'}'
 
 
+@blank_pad
 @tex_centering()
 def scoop_text(file: pathlib.Path) -> str:
     try:
@@ -62,7 +74,7 @@ def scoop_text(file: pathlib.Path) -> str:
     return contents
 
 
-@tex_centering()
+@blank_pad
 def scoop_pdf(file: pathlib.Path, ) -> str:
     return r'\includepdf[pages=-,pagecommand={},width=\linewidth]{' + sanitize_path(file.absolute()) + r'}'
     #

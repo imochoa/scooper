@@ -19,7 +19,9 @@ from pyscooper.cli_utils import debug, info, warning, error
 # from pyscooper.tableofcontents import build_toc_tree, build_filetree, sort_toc_maps, filemap2tocmap
 from pyscooper.tex_utils import (sanitize_tex, export_tex_doc, compile_doc, compress_doc,
                                  tex_section, tex_subsection, tex_subsubsection,
-                                 TOC_HEADING_FCN_MAP)
+                                 TOC_HEADING_FCN_MAP,
+                                 DEEPEST_TOC_LVL,
+                                 )
 # from pyscooper.tex_template import tex_section, tex_subsection, tex_subsubsection, LATEX_PREFIX, LATEX_SUFFIX
 # from pyscooper import VALID_EXTS, Resource, TEX_TEMPLATE, SPLIT_TEXT
 
@@ -44,6 +46,23 @@ class TOCFile:
         return f"<{self.__class__} filepath={self.filepath}, keypath={self.keypath}>"
 
 
+def get_search_root(entry: TOCFile, default: str = '/') -> str:
+    try:
+        parts = list(entry.filepath.parts[:-1])
+        folded_dirs = [(p1, p2) for p1, p2 in zip(parts[:-1], parts[1:]) if folding_fcn(p1, p2) in entry.keypath]
+        for p1, p2 in folded_dirs[::-1]:
+            p1_idx = parts.index(p1)
+            parts[p1_idx] = folding_fcn(p1, parts.pop(p1_idx + 1))
+        return parts[parts.index(entry.keypath[0]) - 1]
+    except ValueError as e:
+        debug(f"Failed to find parent of {entry.filepath}")
+    return default
+
+
+def folding_fcn(s1: str, s2: str) -> str:
+    return f"{s1}/{s2}"
+
+
 def fold_empty_nodes(recd: dict,
                      ) -> T.Tuple[T.Dict, bool]:
     """
@@ -61,7 +80,8 @@ def fold_empty_nodes(recd: dict,
 
         if lf:
             [lk] = ld.keys()
-            recd[f"{k}/{lk}"] = recd.pop(k).pop(lk)
+            recd[folding_fcn(k, lk)] = recd.pop(k).pop(lk)
+            # recd[f"{k}/{lk}"] = recd.pop(k).pop(lk)
 
     return recd, foldable
 
@@ -165,6 +185,9 @@ if __name__ == "__main__":
     # Collapse first!
 
     filemap, _ = fold_empty_nodes(filemap)
+
+    # TODO flatten to max DEEPEST_TOC_LVL levels!
+
     entries = extract_entries(filemap)
 
     # Write LaTeX document
@@ -175,44 +198,28 @@ if __name__ == "__main__":
 
         # Build LaTeX source
 
+        toc_lvl_map = {idx: idx for idx in range(DEEPEST_TOC_LVL + 1)}
         tex_body = ""
-        toc_lvl = 0
-
+        curr_path = []
         for entry in entries:
-            last_toc_level = toc_lvl
-            toc_lvl = {0: 0,
-                       1: 1,
-                       }.get(len(entry.keypath), 2)
+            last_path = curr_path
+            curr_path = entry.keypath
+            toc_lvl = toc_lvl_map.get(len(entry.keypath), DEEPEST_TOC_LVL)
 
-            toc_entry_fcn = TOC_HEADING_FCN_MAP[toc_lvl]
+            # TOC NESTING
+            update_map = {toc_lvl: entry.filepath.name}
+            diff_detected = False
+            for idx in range(toc_lvl):
+                last_val = last_path[idx] if idx < len(last_path) else None
+                curr_val = curr_path[idx] if idx < len(curr_path) else None
 
-            # TOC Nesting
-            toc_delta = toc_lvl - last_toc_level
-            if toc_lvl > last_toc_level:
-                try:
-                    parts = list(entry.filepath.parts[:-1])
-                    folded_dirs = [(p1, p2) for p1, p2 in zip(parts[:-1], parts[1:]) if f"{p1}/{p2}" in entry.keypath]
-                    for p1, p2 in folded_dirs[::-1]:
-                        p1_idx = parts.index(p1)
-                        parts[p1_idx] = f"{p1}/{parts.pop(p1_idx + 1)}"
-                    top_lvl = parts[parts.index(entry.keypath[0]) - 1]
-                except ValueError as e:
-                    debug(f"Failed to find parent of {entry.filepath}")
-                    top_lvl = '/'
-                deepest_lvl = max(TOC_HEADING_FCN_MAP.keys())
-                entries_beyond_depth = ' / '.join(entry.keypath[deepest_lvl:])
-                entries_beyond_depth = [' / '.join(entries_beyond_depth)] if entries_beyond_depth else []
-                path2entry = entry.keypath[:deepest_lvl] + entries_beyond_depth
-                path2entry = [top_lvl] if not path2entry else path2entry
-                nested_tocs = dict()
-                for idx in range(last_toc_level, toc_lvl):
-                    tex_body += TOC_HEADING_FCN_MAP[idx](path2entry[idx])
+                diff_detected = diff_detected or (curr_val is not None
+                                                  and curr_val != last_val)
+                if diff_detected:
+                    update_map[idx] = curr_path[idx]
 
-                # for idx, p in enumerate(path2entry):
-                #     tex_body += TOC_HEADING_FCN_MAP[idx](p)
-
-            # TOC entry (real file name)
-            tex_body += toc_entry_fcn(entry.filepath.name)
+            for idx in sorted(update_map):
+                tex_body += TOC_HEADING_FCN_MAP[idx](update_map[idx])
 
             # Include a LINK to the file -> avoids filename issues (like with spaces)
             link = link_dir / f"{uuid.uuid4()}{entry.filepath.suffix.lower()}"

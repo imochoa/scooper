@@ -122,6 +122,8 @@ TOC_HEADING_FCN_MAP = {
     2: tex_subsubsection,
 }
 
+DEEPEST_TOC_LVL = max(TOC_HEADING_FCN_MAP.keys())
+
 if __name__ == '__main__':
     print(tex_section('SECTION TITLE'))
     print(tex_subsection('SUB-SECTION TITLE'))

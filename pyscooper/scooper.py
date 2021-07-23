@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 import uuid
 
-from pyscooper.attachments import scoop, VALID_EXTS, MINTED_EXTS
+from pyscooper.attachments import scoop, MINTED_EXTS, ext_match, TOCFile, EXT_MAP
 from pyscooper import deps
 from pyscooper.cli_utils import debug, info, warning, error
 # from pyscooper.tableofcontents import build_toc_tree, build_filetree, sort_toc_maps, filemap2tocmap
@@ -24,20 +24,6 @@ from pyscooper.tex_utils import (sanitize_tex, export_tex_doc, compile_doc, comp
                                  TOC_HEADING_FCN_MAP,
                                  DEEPEST_TOC_LVL,
                                  )
-
-
-# from pyscooper.tex_template import tex_section, tex_subsection, tex_subsubsection, LATEX_PREFIX, LATEX_SUFFIX
-# from pyscooper import VALID_EXTS, Resource, TEX_TEMPLATE, SPLIT_TEXT
-
-class TOCFile:
-
-    def __init__(self, filepath: pathlib.Path, keypath: T.Tuple[str], ):
-        # To the PARENT dir!
-        self.filepath = filepath
-        self.keypath = keypath
-
-    def __repr__(self):
-        return f"<{self.__class__} filepath={self.filepath}, keypath={self.keypath}>"
 
 
 def get_search_root(entry: TOCFile, default: str = '/') -> str:
@@ -130,11 +116,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Check deps
-    use_minted = deps.was_pygmentize_found()
+    use_minted = deps.PYGMENTIZE_OK
     if not use_minted:
         warning("Pygmentize was not found")
-        warning('\n\t> '.join([f"Removing {len(MINTED_EXTS)} exntesions"] + sorted(MINTED_EXTS)))
-        VALID_EXTS = VALID_EXTS.difference(MINTED_EXTS)
+        # warning('\n\t> '.join([f"Removing {len(MINTED_EXTS)} extensions"] + sorted(MINTED_EXTS)))
+        # VALID_EXTS = set(EXT_MAP).difference(MINTED_EXTS)
     elif args.debug:
         debug("Found Pygmentize!")
 
@@ -142,7 +128,7 @@ if __name__ == "__main__":
     sources = [pathlib.Path(s).expanduser() for s in sources]  # For pre-expanded globs
 
     # Top-level files (can be overwritten by the glob matches)
-    top_files = {f for f in sources if f.is_file() and f.suffix.lower() in VALID_EXTS}
+    top_files = {f for f in sources if f.is_file() and ext_match(f)}
     top_dirs = {d for d in sources if d.is_dir()}
     other_strings = sorted(
         map(str, set(sources).difference(top_files).difference(top_dirs))
@@ -183,7 +169,7 @@ if __name__ == "__main__":
     # Dirs and globs -> search!
     for top_dir in top_dirs:
         fs = (f for f in top_dir.rglob('*') if f.is_file())
-        fs = (f for f in fs if f.suffix.lower() in VALID_EXTS)
+        fs = (f for f in fs if ext_match(f) is not None)
         for f in fs:
             relpath = f.relative_to(top_dir)
             *ancestors, filename = relpath.parts
@@ -203,9 +189,7 @@ if __name__ == "__main__":
     entries = extract_entries(filemap)
 
     # Don't include minted unless it is required
-    if use_minted:
-        found_exts = (e.filepath.suffix.lower() for e in entries)
-        use_minted = use_minted and any(e for e in found_exts if e in MINTED_EXTS)
+    use_minted = use_minted and any(e for e in entries if e.ext_key in MINTED_EXTS)
 
     # Write LaTeX document
     with tempfile.TemporaryDirectory() as tmp:
@@ -248,7 +232,7 @@ if __name__ == "__main__":
         export_tex_doc(
             tex_body=tex_body,
             out_path=src_tex,
-            use_minted=True,
+            use_minted=use_minted,
         )
 
         pdf_path = compile_doc(src_tex, tmp_dir)

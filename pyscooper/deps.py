@@ -7,7 +7,7 @@ import pathlib
 import subprocess
 import itertools
 
-from pyscooper.cli_utils import debug
+from pyscooper.cli_utils import debug, info
 
 
 def was_pdflatex_found() -> bool:
@@ -28,8 +28,6 @@ def was_ghostscript_found() -> bool:
 
 def was_pygmentize_found() -> bool:
     """
-
-
         # from pygments.formatters import LatexFormatter
         # print(LatexFormatter().get_style_defs())
     :return:
@@ -41,7 +39,7 @@ def was_pygmentize_found() -> bool:
     return p.returncode == 0
 
 
-def return_pygmentize_lexers() -> T.Dict[str, T.Set[str]]:
+def get_pygmentize_lexers() -> T.Dict[str, T.Set[str]]:
     # Assumes pygmentize was found...
     p = subprocess.run(['pygmentize', '-L', 'lexers'], capture_output=True, check=True)
     lexer_stdout = p.stdout.decode('utf8')
@@ -59,7 +57,7 @@ def return_pygmentize_lexers() -> T.Dict[str, T.Set[str]]:
 
     for m in regex_iter:
         lexer, filenames = m.groups()
-        lexer_map[lexer] = [f.strip() for f in filenames.split(',')]
+        lexer_map[lexer.strip()] = sorted({f.strip().lower() for f in filenames.split(',')})
 
     return lexer_map
 
@@ -84,8 +82,42 @@ def was_pandas_found() -> bool:
     return True
 
 
+PYGMENTIZE_OK = was_pygmentize_found()
+PANDAS_OK = was_pandas_found()
+PDFLATEX_OK = was_pdflatex_found()
+GHOSTSCRIPT_OK = was_ghostscript_found()
+
 if __name__ == '__main__':
     was_pdflatex_found()
     was_ghostscript_found()
     was_pygmentize_found()
-    return_pygmentize_lexers()
+
+    # Use this to generate the MINTED_LEXERS dictionary!
+    if was_pygmentize_found():
+        MINTED_LEXERS = get_pygmentize_lexers()
+        MINTED_EXTS = set()
+        EXT2LEXER = dict()
+        if PYGMENTIZE_OK:
+            MINTED_LEXERS = get_pygmentize_lexers()
+            repeated_globs = set()
+            for lexer, exts in MINTED_LEXERS.items():
+                for ext in exts:
+                    if ext in MINTED_EXTS:
+                        repeated_globs.add(ext)
+                    else:
+                        MINTED_EXTS.add(ext)
+                        EXT2LEXER[ext] = lexer
+                        # EXT_MAP[ext] = scoop_minted_fcn(lexer)
+
+            if repeated_globs:
+                MINTED_EXTS = MINTED_EXTS.difference(repeated_globs)
+                for k in repeated_globs:
+                    EXT2LEXER.pop(k)
+            info("Unique extensions")
+            info('\n'.join([f"'{k}' : '{vs}' , " for k, vs in EXT2LEXER.items()]))
+
+            if repeated_globs:
+                debug('\n\t> '.join([f"[{len(repeated_globs)}] Non-unique extensions"] + sorted(repeated_globs)))
+                # debug('\n'.join([f"'{k}' :{vs}, " for k, vs in MINTED_LEXERS.items()
+                #                  if any(v for v in vs if v in repeated_globs)]))
+

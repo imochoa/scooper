@@ -6,7 +6,7 @@ import pathlib
 import subprocess
 import itertools
 
-from pyscooper import LATEX_PREFIX, LATEX_SUFFIX
+from pyscooper.tex_template import build_tex_template
 
 
 def sanitize_tex(in_str: object) -> str:
@@ -25,8 +25,7 @@ def sanitize_tex(in_str: object) -> str:
 
 def export_tex_doc(tex_body: str,
                    out_path: T.Union[str, pathlib.Path],
-                   tex_prefix: str = LATEX_PREFIX,
-                   tex_suffix: str = LATEX_SUFFIX,
+                   use_minted: bool = False,
                    ) -> bool:
     """
     Outputs a tex. document at *out_path* with the contents in *tex_body* surrounded by the LaTeX template
@@ -35,6 +34,8 @@ def export_tex_doc(tex_body: str,
     :param out_path:
     :return:
     """
+
+    tex_prefix, tex_suffix = build_tex_template(use_minted=use_minted, )
 
     with open(out_path, 'w') as fp:
         fp.write('\n'.join([tex_prefix, tex_body, tex_suffix]))
@@ -78,12 +79,20 @@ def compress_doc(in_pdf: pathlib.Path,
     return False
 
 
-def compile_doc(src_tex: pathlib.Path, out_dir: pathlib.Path) -> T.Union[pathlib.Path, None]:
-    cmd = ['pdflatex',
-           '-output-directory',
-           str(out_dir),
-           str(src_tex),
-           ]
+def compile_doc(src_tex: pathlib.Path,
+                out_dir: pathlib.Path,
+                shell_escape: bool = True,
+                ) -> T.Union[pathlib.Path, None]:
+    cmd = ['pdflatex']
+
+    if shell_escape:
+        cmd += ['-shell-escape']
+
+    cmd += [
+        '-output-directory',
+        str(out_dir),
+        str(src_tex),
+    ]
     p1 = subprocess.run(cmd)
     p2 = subprocess.run(cmd)
 

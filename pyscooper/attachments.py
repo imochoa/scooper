@@ -55,8 +55,34 @@ def blank_pad(fcn):
     return wrapper
 
 
+def centering(fcn):
+    @functools.wraps(fcn)
+    def wrapper(*args, **kwargs):
+        return "\n" + r"\begin{centering}" + f"\n{fcn(*args, **kwargs)}\n" + r"\end{centering}" + "\n"
+
+    return wrapper
+
+
+def vspace(fcn):
+    @functools.wraps(fcn)
+    def wrapper(*args, **kwargs):
+        return "\n\t" + r"\vspace*{\fill}" + f"\n{fcn(*args, **kwargs)}\n\t" + r"\vspace*{\fill}" + "\n"
+
+    return wrapper
+
+
+def pagebreak_after(fcn):
+    @functools.wraps(fcn)
+    def wrapper(*args, **kwargs):
+        return f"{fcn(*args, **kwargs)}\n" + r"\pagebreak" + "\n"
+
+    return wrapper
+
+
 @blank_pad
-@tex_centering(add_pagebreak=True)
+@pagebreak_after
+@centering
+@vspace
 def scoop_img(file: pathlib.Path, width: None = None, ) -> str:
     return r'\includegraphics[width=\linewidth]{' + sanitize_path(file.absolute()) + r'}'
 
@@ -77,17 +103,6 @@ def scoop_text(file: pathlib.Path) -> str:
 @blank_pad
 def scoop_pdf(file: pathlib.Path, ) -> str:
     return r'\includepdf[pages=-,pagecommand={},width=\linewidth]{' + sanitize_path(file.absolute()) + r'}'
-    #
-    # return '\n'.join(
-    #     [
-    #         r'',
-    #         r'\begin{centering}',
-    #         r'\vspace*{\fill}',
-    #         r'\includepdf[pages=-,pagecommand={},width=\linewidth]{' + sanitize_path(file.absolute()) + r'}',
-    #         r'\vspace*{\fill}',
-    #         r'\end{centering}',
-    #         r'',
-    #     ])
 
 
 @tex_centering()
@@ -105,18 +120,54 @@ def scoop_3d(file: pathlib.Path) -> str:
     return "TODO "
 
 
+# Minted scoopers -> All the same with different types
+def scoop_minted_fcn(lexer: str) -> T.Callable[[pathlib.Path], str]:
+    @blank_pad
+    def wrapped(file: pathlib.Path, ) -> str:
+        return r'\inputminted{' + str(lexer) + r"}{" + sanitize_path(file.absolute()) + r'}'
+
+    return wrapped
+
+
 EXT_MAP = {
     '.jpg': scoop_img,
     '.jpeg': scoop_img,
     '.png': scoop_img,
-    '.tex': scoop_text,
     '.txt': scoop_text,
     '.log': scoop_text,
-    '.py': scoop_text,
+    # '.svg': 'todo',
+    # '.eps': 'todo',
+    # '.csv': 'todo',
+    # '.tsv': 'todo',
     '.pdf': scoop_pdf,
     '.mp4': scoop_vid,
+    # '.gif': 'todo',
     '.mp3': scoop_song,
 }
+
+# TODO Autogenerate them!
+# TODO change to filename globs? (to match eg "Dockerfile ...")
+MINTED_LEXERS = {
+    'python': ['.py', ],
+    'json': ['.json', ],
+    'sh': ['.sh'],
+    'bash': ['.bash', '.bashrc', ],
+    'zsh': ['.zsh', '.zshrc', ],
+    'html': ['.html', '.htm', '.xhtml', '.xslt'],
+    'css': ['.css'],
+    'javascript': ['.js', '.jsm', '.mjs', ],
+    'cmake': ['.cmake', ],
+    'docker': ['.docker', ],
+    'cpp': ['.cpp', '.hpp', '.c++', '.h++', '.cc', '.hh', '.cxx', '.hxx'],
+    'xml': ['.xml', '.xsl', '.rss', '.xslt', '.xsd', '.wsdl', '.wsf', ]
+}
+
+MINTED_EXTS = set()
+
+for lexer, exts in MINTED_LEXERS.items():
+    for ext in exts:
+        MINTED_EXTS.add(ext)
+        EXT_MAP[ext] = scoop_minted_fcn(lexer)
 
 VALID_EXTS = set(EXT_MAP.keys())
 

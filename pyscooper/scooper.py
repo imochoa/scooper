@@ -15,7 +15,8 @@ import subprocess
 import tempfile
 import uuid
 
-from pyscooper.attachments import scoop, VALID_EXTS
+from pyscooper.attachments import scoop, VALID_EXTS, MINTED_EXTS
+from pyscooper import deps
 from pyscooper.cli_utils import debug, info, warning, error
 # from pyscooper.tableofcontents import build_toc_tree, build_filetree, sort_toc_maps, filemap2tocmap
 from pyscooper.tex_utils import (sanitize_tex, export_tex_doc, compile_doc, compress_doc,
@@ -23,18 +24,10 @@ from pyscooper.tex_utils import (sanitize_tex, export_tex_doc, compile_doc, comp
                                  TOC_HEADING_FCN_MAP,
                                  DEEPEST_TOC_LVL,
                                  )
+
+
 # from pyscooper.tex_template import tex_section, tex_subsection, tex_subsubsection, LATEX_PREFIX, LATEX_SUFFIX
 # from pyscooper import VALID_EXTS, Resource, TEX_TEMPLATE, SPLIT_TEXT
-
-from typing import NamedTuple, Any
-
-
-# class TOCFile(NamedTuple):
-#     filepath: pathlib.Path
-#     # To the PARENT dir!
-#     keypath: T.Tuple[str]
-
-# TODO add joining fcn instead of f"{}/{}"
 
 class TOCFile:
 
@@ -136,6 +129,15 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Check deps
+    use_minted = deps.was_pygmentize_found()
+    if not use_minted:
+        warning("Pygmentize was not found")
+        warning('\n\t> '.join([f"Removing {len(MINTED_EXTS)} exntesions"] + sorted(MINTED_EXTS)))
+        VALID_EXTS = VALID_EXTS.difference(MINTED_EXTS)
+    elif args.debug:
+        debug("Found Pygmentize!")
+
     sources = args.sources if isinstance(args.sources, list) else [args.sources]
     sources = [pathlib.Path(s).expanduser() for s in sources]  # For pre-expanded globs
 
@@ -192,10 +194,18 @@ if __name__ == "__main__":
     # Collapse first!
 
     filemap, _ = fold_empty_nodes(filemap)
+    if args.debug:
+        debug("Found the following files:")
+        debug(pprint.pformat(filemap))
 
     # TODO flatten to max DEEPEST_TOC_LVL levels!
 
     entries = extract_entries(filemap)
+
+    # Don't include minted unless it is required
+    if use_minted:
+        found_exts = (e.filepath.suffix.lower() for e in entries)
+        use_minted = use_minted and any(e for e in found_exts if e in MINTED_EXTS)
 
     # Write LaTeX document
     with tempfile.TemporaryDirectory() as tmp:
@@ -238,6 +248,7 @@ if __name__ == "__main__":
         export_tex_doc(
             tex_body=tex_body,
             out_path=src_tex,
+            use_minted=True,
         )
 
         pdf_path = compile_doc(src_tex, tmp_dir)

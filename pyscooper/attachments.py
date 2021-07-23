@@ -130,8 +130,8 @@ def scoop_text(file: pathlib.Path) -> str:
     with open(file, 'r') as fp:
         contents = sanitize_tex('\n'.join(fp.readlines()))
     # Ensure the encodings are OK
-    encoding = 'ascii'  # Safe for TeX
-    # encoding='utf-8' # Should work... might be riskier for TeX
+    # encoding = 'ascii'  # Safe for TeX
+    encoding='utf-8' # Should work... might be riskier for TeX
     contents = contents.encode(encoding, 'ignore').decode(encoding)
     return contents
 

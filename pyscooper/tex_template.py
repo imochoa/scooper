@@ -3,7 +3,9 @@
 import typing as T
 
 
-def build_tex_template(use_minted: bool = False, ) -> T.Tuple[str, str]:
+def build_tex_template(use_minted: bool = False,
+                       use_pandas: bool = True,
+                       ) -> T.Tuple[str, str]:
     tex_suffix = r"""
 % ---- PYTHON AUTO-SPLIT ----
 %% Done
@@ -25,10 +27,19 @@ def build_tex_template(use_minted: bool = False, ) -> T.Tuple[str, str]:
 
     if use_minted:
         tex_prefix += r"""
+        
 \usepackage{minted}
 %\usemintedstyle{friendly}
 %\usemintedstyle{colorfull}
 \usemintedstyle{strata}
+
+        """
+
+    if use_pandas:
+        tex_prefix += r"""
+        
+\usepackage{booktabs}
+
         """
 
     tex_prefix += r"""

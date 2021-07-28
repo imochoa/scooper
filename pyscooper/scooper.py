@@ -15,7 +15,13 @@ import subprocess
 import tempfile
 import uuid
 
-from pyscooper.attachments import scoop, MINTED_EXTS, ext_match, TOCFile, EXT_MAP
+from pyscooper.attachments import (scoop,
+                                   MINTED_EXTS,
+                                   PANDAS_EXTS,
+                                   ext_match,
+                                   TOCFile,
+                                   EXT_MAP,
+                                   )
 from pyscooper import deps
 from pyscooper.cli_utils import debug, info, warning, error
 # from pyscooper.tableofcontents import build_toc_tree, build_filetree, sort_toc_maps, filemap2tocmap
@@ -124,6 +130,13 @@ if __name__ == "__main__":
     elif args.debug:
         debug("Found Pygmentize!")
 
+    use_pandas = deps.PANDAS_OK
+    if not use_pandas:
+        warning("Pandas not found")
+    else:
+        debug("Found Pandas")
+
+    # Start the search
     sources = args.sources if isinstance(args.sources, list) else [args.sources]
     sources = [pathlib.Path(s).expanduser() for s in sources]  # For pre-expanded globs
 
@@ -190,6 +203,7 @@ if __name__ == "__main__":
 
     # Don't include minted unless it is required
     use_minted = use_minted and any(e for e in entries if e.ext_key in MINTED_EXTS)
+    use_pandas = use_pandas and any(e for e in entries if e.ext_key in PANDAS_EXTS)
 
     # Write LaTeX document
     with tempfile.TemporaryDirectory() as tmp:
@@ -233,6 +247,7 @@ if __name__ == "__main__":
             tex_body=tex_body,
             out_path=src_tex,
             use_minted=use_minted,
+            use_pandas=use_pandas,
         )
 
         pdf_path = compile_doc(src_tex, tmp_dir)

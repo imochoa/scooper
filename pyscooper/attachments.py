@@ -9,7 +9,7 @@ import glob
 import fnmatch
 
 from pyscooper.tex_utils import sanitize_tex
-from pyscooper.deps import PYGMENTIZE_OK, get_pygmentize_lexers
+from pyscooper import deps
 from pyscooper.cli_utils import debug, info, warning, error
 
 
@@ -131,7 +131,7 @@ def scoop_text(file: pathlib.Path) -> str:
         contents = sanitize_tex('\n'.join(fp.readlines()))
     # Ensure the encodings are OK
     # encoding = 'ascii'  # Safe for TeX
-    encoding='utf-8' # Should work... might be riskier for TeX
+    encoding = 'utf-8'  # Should work... might be riskier for TeX
     contents = contents.encode(encoding, 'ignore').decode(encoding)
     return contents
 
@@ -162,6 +162,26 @@ def scoop_3d(file: pathlib.Path) -> str:
     return "TODO "
 
 
+@blank_pad
+@pagebreak_after
+@centering
+@vspace
+def pandas_scoop_csv(file: pathlib.Path) -> str:
+    import pandas as pd
+
+    df = pd.read_csv(file,
+                     delim_whitespace=True,
+                     skipinitialspace=True,
+                     )
+    # delimiter=','
+    # sep=','
+
+    return df.to_latex()
+
+
+pandas_scoop_tsv = pandas_scoop_csv
+
+
 # Minted scoopers -> All the same with different types
 def scoop_minted_fcn(lexer: str) -> T.Callable[[pathlib.Path], str]:
     @blank_pad
@@ -180,17 +200,16 @@ EXT_MAP = {
     '*.log': scoop_text,
     # '*.svg': 'todo',
     # '*.eps': 'todo',
-    # '*.csv': 'todo',
-    # '*.tsv': 'todo',
     '*.pdf': scoop_pdf,
-    '*.mp4': scoop_vid,
+    # '*.mp4': scoop_vid,
     # '*.gif': 'todo',
-    '*.mp3': scoop_song,
+    # '*.mp3': scoop_song,
 }
 
 MINTED_LEXERS = dict()
 MINTED_EXTS = set()
-if PYGMENTIZE_OK:
+if deps.PYGMENTIZE_OK:
+    # deps.get_pygmentize_lexers
     unique_ext2lexer = {
         '*.abap': 'abap',
         '*.abnf': 'abnf',
@@ -815,7 +834,18 @@ if PYGMENTIZE_OK:
         MINTED_EXTS.add(ext)
         EXT_MAP[ext] = scoop_minted_fcn(lexer)
 
+PANDAS_EXT_MAP = dict()
+if deps.PANDAS_OK:
+    PANDAS_EXT_MAP = {
+        '*.csv': pandas_scoop_csv,
+        '*.tsv': pandas_scoop_tsv,
+    }
+    EXT_MAP.update(PANDAS_EXT_MAP)
+PANDAS_EXTS = set(PANDAS_EXT_MAP.keys())
 
+
+# Matching & scooping logic
+# -------------------------------------------------------------------------------------------------------------------- #
 def ext_match(file: pathlib.Path) -> T.Optional[str]:
     """Return the first valid exension string (key in EXT_MAP) that matches the file OR None if it was not known"""
     l_name = file.name.lower()

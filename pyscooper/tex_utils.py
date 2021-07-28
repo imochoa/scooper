@@ -26,6 +26,7 @@ def sanitize_tex(in_str: object) -> str:
 def export_tex_doc(tex_body: str,
                    out_path: T.Union[str, pathlib.Path],
                    use_minted: bool = False,
+                   use_pandas: bool = False,
                    ) -> bool:
     """
     Outputs a tex. document at *out_path* with the contents in *tex_body* surrounded by the LaTeX template
@@ -35,7 +36,10 @@ def export_tex_doc(tex_body: str,
     :return:
     """
 
-    tex_prefix, tex_suffix = build_tex_template(use_minted=use_minted, )
+    tex_prefix, tex_suffix = build_tex_template(
+        use_minted=use_minted,
+        use_pandas=use_pandas,
+    )
 
     with open(out_path, 'w') as fp:
         fp.write('\n'.join([tex_prefix, tex_body, tex_suffix]))

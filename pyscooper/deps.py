@@ -63,23 +63,12 @@ def get_pygmentize_lexers() -> T.Dict[str, T.Set[str]]:
 
 
 def was_pandas_found() -> bool:
-    import importlib.util
-    import sys
-
-    # For illustrative purposes.
-    name = 'itertools'
-
-    if name in sys.modules:
-        print(f"{name!r} already in sys.modules")
-    elif (spec := importlib.util.find_spec(name)) is not None:
-        # If you choose to perform the actual import ...
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-        print(f"{name!r} has been imported")
-    else:
-        print(f"can't find the {name!r} module")
-    return True
+    try:
+        import pandas as pd
+        return True
+    except ModuleNotFoundError:
+        pass
+    return False
 
 
 PYGMENTIZE_OK = was_pygmentize_found()
@@ -120,4 +109,3 @@ if __name__ == '__main__':
                 debug('\n\t> '.join([f"[{len(repeated_globs)}] Non-unique extensions"] + sorted(repeated_globs)))
                 # debug('\n'.join([f"'{k}' :{vs}, " for k, vs in MINTED_LEXERS.items()
                 #                  if any(v for v in vs if v in repeated_globs)]))
-
